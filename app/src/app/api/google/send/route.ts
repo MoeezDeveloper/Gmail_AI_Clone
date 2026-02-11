@@ -1,31 +1,37 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { refreshGoogleToken, sendGmail } from "@/lib/google";
+import { auth } from "@/lib/auth";
 
-async function getValidAccessToken(): Promise<{ token: string } | { error: string }> {
+async function getValidAccessToken(userId: string): Promise<{ token: string } | { error: string }> {
   const account = await prisma.account.findFirst({
-    where: { provider: "google" },
+    where: {
+      userId,
+      provider: "google"
+    },
   });
 
   if (!account) return { error: "No Google account found. Please authenticate via /api/google/auth" };
 
   // If token is not expired, return it
-  if (!account.expiresAt || new Date() <= account.expiresAt) {
-    return { token: account.accessToken! };
+  // expires_at is Int (seconds)
+  if (!account.expires_at || (Date.now() / 1000) <= account.expires_at) {
+    if (!account.access_token) return { error: "Access token missing" };
+    return { token: account.access_token };
   }
 
   // Token is expired - try to refresh
-  if (!account.refreshToken) {
+  if (!account.refresh_token) {
     return { error: "Token expired and no refresh token available. Please re-authenticate via /api/google/auth" };
   }
 
   try {
-    const newTokens = await refreshGoogleToken(account.refreshToken);
+    const newTokens = await refreshGoogleToken(account.refresh_token);
     await prisma.account.update({
       where: { id: account.id },
       data: {
-        accessToken: newTokens.access_token,
-        expiresAt: new Date(Date.now() + newTokens.expires_in * 1000),
+        access_token: newTokens.access_token,
+        expires_at: Math.floor(Date.now() / 1000 + newTokens.expires_in),
       },
     });
     return { token: newTokens.access_token };
@@ -37,7 +43,12 @@ async function getValidAccessToken(): Promise<{ token: string } | { error: strin
 
 export async function POST(req: Request) {
   try {
-    const result = await getValidAccessToken();
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const result = await getValidAccessToken(session.user.id);
     if ('error' in result) {
       return NextResponse.json(
         { error: result.error },

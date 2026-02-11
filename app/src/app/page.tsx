@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession, signIn } from "next-auth/react";
 import { Input } from "@/components/ui/input";
 import { MailSidebar } from "@/components/mail/sidebar";
 import { ThreadList } from "@/components/mail/thread-list";
@@ -10,6 +11,7 @@ import { mockThreads, EmailThread, toEmailThread, MailFolder } from "@/lib/mock-
 import { ComposeMail, ReplyContext } from "@/components/mail/compose-mail";
 
 export default function Home() {
+  const { data: session, status } = useSession();
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThread, setSelectedThread] = useState<EmailThread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,34 +25,43 @@ export default function Home() {
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
 
+  useEffect(() => {
+    setIsConnected(status === "authenticated");
+  }, [status]);
 
   // Fetch threads from database
   const fetchThreads = useCallback(async () => {
+    if (status !== "authenticated") return;
+
     try {
       const response = await fetch(`/api/mail/threads?folder=${currentFolder}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.threads && data.threads.length > 0) {
+        if (data.threads) {
           const uiThreads = data.threads.map(toEmailThread);
           setThreads(uiThreads);
-          setIsConnected(true);
           return;
         }
       }
     } catch (error) {
-      console.log("Using mock data:", error);
+      console.log("Error fetching threads:", error);
     }
-    
-    // Fallback to mock data
-    const filtered = mockThreads.filter((t) => t.folder === currentFolder);
-    setThreads(filtered);
-    setIsConnected(false);
-  }, [currentFolder]);
+
+    // If we are here, it means we failed to fetch or empty
+    // We don't necessarily fallback to mock data if authenticated but empty
+  }, [currentFolder, status]);
 
   useEffect(() => {
-    setIsLoading(true);
-    fetchThreads().finally(() => setIsLoading(false));
-  }, [fetchThreads]);
+    if (status === "authenticated") {
+      setIsLoading(true);
+      fetchThreads().finally(() => setIsLoading(false));
+    } else {
+      // Show mock data for demo / unauthenticated state
+      const filtered = mockThreads.filter((t) => t.folder === currentFolder);
+      setThreads(filtered);
+      setIsLoading(false);
+    }
+  }, [fetchThreads, status, currentFolder]);
 
   const handleSelectThread = (thread: EmailThread) => {
     setSelectedThread(thread);
@@ -68,19 +79,18 @@ export default function Home() {
   };
 
   const handleSync = async () => {
+    if (status !== "authenticated") {
+      alert("Please connect your account first.");
+      return;
+    }
     setIsSyncing(true);
     try {
-      // Try Google sync first, fallback to Aurinko
+      // Try Google sync first, fallback to Aurinko (though we prioritized Google in NextAuth)
       let response = await fetch("/api/google/sync", { method: "POST" });
-      
-      // If no Google account, try Aurinko
-      if (response.status === 404) {
-        response = await fetch("/api/mail/sync", { method: "POST" });
-      }
-      
+
       const data = await response.json();
       if (response.ok) {
-        if (data.synced > 0) {
+        if (data.synced >= 0) {
           await fetchThreads();
           alert(`Successfully synced ${data.synced} emails!`);
         }
@@ -91,6 +101,7 @@ export default function Home() {
           }
         } else {
           console.error("Sync issue:", data.error);
+          alert(`Sync failed: ${data.error}`);
         }
       }
     } catch (error) {
@@ -101,8 +112,7 @@ export default function Home() {
   };
 
   const handleConnect = () => {
-    // Use Google OAuth directly instead of Aurinko
-    window.location.href = "/api/google/auth";
+    signIn("google", { callbackUrl: "/" });
   };
 
   const handleSend = async (data: {
@@ -124,7 +134,7 @@ export default function Home() {
     // Refresh threads in the background (don't block)
     fetchThreads();
   };
-  
+
   const handleReply = (thread: EmailThread) => {
     setReplyContext({
       to: thread.senderEmail || thread.sender,
@@ -155,8 +165,8 @@ export default function Home() {
     <main className="flex h-screen min-h-0 flex-col overflow-hidden">
       {/* Mobile Sidebar Sheet */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen} side="left">
-        <MailSidebar 
-          onClose={() => setSidebarOpen(false)} 
+        <MailSidebar
+          onClose={() => setSidebarOpen(false)}
           currentFolder={currentFolder}
           onFolderChange={handleFolderChange}
           onSync={handleSync}
@@ -232,7 +242,7 @@ export default function Home() {
       <section className="flex min-h-0 flex-1 overflow-hidden">
         {/* Desktop Sidebar */}
         <div className="hidden flex-shrink-0 md:block md:w-56 lg:w-64 xl:w-72">
-          <MailSidebar 
+          <MailSidebar
             currentFolder={currentFolder}
             onFolderChange={handleFolderChange}
             onSync={handleSync}

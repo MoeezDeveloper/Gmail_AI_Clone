@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
   title: "AI Gmail Clone",
@@ -16,7 +17,7 @@ export default function RootLayout({
       <body
         className="min-h-screen bg-zinc-50 text-zinc-900 antialiased"
       >
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

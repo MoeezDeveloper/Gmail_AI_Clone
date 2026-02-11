@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchGmailMessages, parseGmailMessage, refreshGoogleToken } from "@/lib/google";
+import { auth } from "@/lib/auth";
 
 // Run promises in batches to avoid exhausting Supabase connection pool
 async function batchAll<T>(tasks: (() => Promise<T>)[], batchSize = 5): Promise<T[]> {
@@ -15,9 +16,17 @@ async function batchAll<T>(tasks: (() => Promise<T>)[], batchSize = 5): Promise<
 
 export async function POST() {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     // Find Google account
     const account = await prisma.account.findFirst({
-      where: { provider: "google" },
+      where: {
+        userId: session.user.id,
+        provider: "google"
+      },
       include: { user: true },
     });
 
@@ -28,12 +37,13 @@ export async function POST() {
       );
     }
 
-    let accessToken = account.accessToken;
+    let accessToken = account.access_token;
     const user = account.user;
 
     // Check if token is expired and refresh if needed
-    if (account.expiresAt && new Date() > account.expiresAt) {
-      if (!account.refreshToken) {
+    // expires_at is in seconds (Int)
+    if (account.expires_at && (Date.now() / 1000) > account.expires_at) {
+      if (!account.refresh_token) {
         return NextResponse.json(
           { error: "Token expired and no refresh token available. Please reconnect.", needsReauth: true },
           { status: 401 }
@@ -41,15 +51,15 @@ export async function POST() {
       }
 
       try {
-        const newTokens = await refreshGoogleToken(account.refreshToken);
+        const newTokens = await refreshGoogleToken(account.refresh_token);
         accessToken = newTokens.access_token;
 
         // Update tokens in database
         await prisma.account.update({
           where: { id: account.id },
           data: {
-            accessToken: newTokens.access_token,
-            expiresAt: new Date(Date.now() + newTokens.expires_in * 1000),
+            access_token: newTokens.access_token,
+            expires_at: Math.floor(Date.now() / 1000 + newTokens.expires_in),
           },
         });
       } catch (refreshError) {
@@ -59,6 +69,10 @@ export async function POST() {
           { status: 401 }
         );
       }
+    }
+
+    if (!accessToken) {
+      return NextResponse.json({ error: "Access token missing" }, { status: 401 });
     }
 
     // Fetch messages from Gmail

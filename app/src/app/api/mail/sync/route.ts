@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchMessages, fetchMessage, AurinkoMessage } from "@/lib/aurinko";
+import { auth } from "@/lib/auth";
 
 // Helper to determine folder from labels
 function getFolderFromLabels(labels?: string[]): "INBOX" | "SENT" | "DRAFTS" | "TRASH" {
@@ -21,27 +22,18 @@ function createSnippet(body?: string, maxLength: number = 100): string {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const { userId, accountId } = body;
-
-    // Find account to sync
-    let account;
-    if (accountId) {
-      account = await prisma.account.findUnique({
-        where: { id: accountId },
-        include: { user: true },
-      });
-    } else if (userId) {
-      account = await prisma.account.findFirst({
-        where: { userId },
-        include: { user: true },
-      });
-    } else {
-      // Get first account (for demo purposes)
-      account = await prisma.account.findFirst({
-        include: { user: true },
-      });
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userId = session.user.id;
+
+    // Find account to sync for the logged-in user
+    const account = await prisma.account.findFirst({
+      where: { userId },
+      include: { user: true },
+    });
 
     if (!account) {
       return NextResponse.json(
@@ -50,7 +42,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const accessToken = account.accessToken;
+    const accessToken = account.access_token;
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "Access token missing. Please reconnect your account." },
+        { status: 401 }
+      );
+    }
     const user = account.user;
 
     // Fetch messages from Aurinko
@@ -62,28 +60,28 @@ export async function POST(request: Request) {
     } catch (fetchError) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown error";
       console.error("Aurinko fetch error:", errorMsg);
-      
+
       // Check for specific errors
       if (errorMsg.includes("SERVICE_DISABLED") || errorMsg.includes("Gmail API")) {
         return NextResponse.json(
-          { 
+          {
             error: "Gmail API is not enabled. Please check your Aurinko dashboard settings or reconnect your account.",
             details: "The Gmail API needs to be enabled in your Aurinko application configuration."
           },
           { status: 403 }
         );
       }
-      
+
       if (errorMsg.includes("401") || errorMsg.includes("Unauthorized")) {
         return NextResponse.json(
-          { 
+          {
             error: "Access token expired. Please reconnect your Gmail account.",
             needsReauth: true
           },
           { status: 401 }
         );
       }
-      
+
       throw fetchError;
     }
 

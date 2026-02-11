@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Folder } from "@prisma/client";
+import { auth } from "@/lib/auth";
 
 export async function GET(request: Request) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const folderParam = searchParams.get("folder");
-    
+
     // Validate folder
     const validFolders: Folder[] = ["INBOX", "SENT", "DRAFTS", "TRASH"];
-    const folder = validFolders.includes(folderParam as Folder) 
-      ? (folderParam as Folder) 
+    const folder = validFolders.includes(folderParam as Folder)
+      ? (folderParam as Folder)
       : undefined;
 
     const threads = await prisma.thread.findMany({
-      where: folder ? { folder } : undefined,
+      where: {
+        userId: session.user.id,
+        ...(folder ? { folder } : {}),
+      },
       include: {
         emails: {
           orderBy: { sentAt: "desc" },
