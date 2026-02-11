@@ -2,7 +2,7 @@ import { prisma } from "../src/lib/prisma";
 
 async function main() {
   console.log("Checking database...\n");
-  
+
   // Check accounts
   const accounts = await prisma.account.findMany({
     include: { user: true },
@@ -12,10 +12,10 @@ async function main() {
     console.log(`  - ID: ${a.id}`);
     console.log(`    Email: ${a.emailAddress}`);
     console.log(`    User: ${a.user?.email}`);
-    console.log(`    Has Token: ${!!a.accessToken}`);
-    console.log(`    Token (first 20): ${a.accessToken.substring(0, 20)}...`);
+    console.log(`    Has Token: ${!!a.access_token}`);
+    console.log(`    Token (first 20): ${a.access_token ? a.access_token.substring(0, 20) : "None"}...`);
   });
-  
+
   // Check threads
   const threads = await prisma.thread.findMany({
     include: { emails: true },
@@ -25,7 +25,7 @@ async function main() {
   threads.forEach((t) => {
     console.log(`  - ${t.subject} (${t.emails.length} emails)`);
   });
-  
+
   // Check emails
   const emailCount = await prisma.email.count();
   console.log("\nTotal Emails:", emailCount);

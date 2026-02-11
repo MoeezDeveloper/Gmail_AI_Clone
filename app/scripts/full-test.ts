@@ -48,7 +48,7 @@ async function runTests() {
   // Test 6: Seed Data if empty
   if (threads.length === 0) {
     console.log("\n🌱 Test 6: Seeding Test Data");
-    
+
     let user = await prisma.user.findFirst();
     if (!user) {
       user = await prisma.user.create({
@@ -76,7 +76,7 @@ async function runTests() {
           emails: {
             create: {
               from: email.from,
-              to: user.email,
+              to: user.email || "test@example.com",
               subject: email.subject,
               body: email.body,
               isRead: false,

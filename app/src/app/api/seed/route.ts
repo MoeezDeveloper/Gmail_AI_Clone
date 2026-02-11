@@ -67,7 +67,7 @@ export async function POST() {
           emails: {
             create: {
               from: email.from,
-              to: user.email,
+              to: user.email || "test@example.com",
               subject: email.subject,
               body: email.body,
               isRead: false,
